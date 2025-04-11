@@ -11,7 +11,7 @@ This pipeline job:
 3. Blocks pushes and merge requests for branches that don't follow the convention
 4. Allows configurable exceptions for protected branches
 
-## Screenshot
+## Example Message
 
 ```
 Found Jira ticket ID: SNX-111
