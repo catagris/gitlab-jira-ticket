@@ -1,0 +1,91 @@
+# Jira branch name validation job
+# See README.md for full documentation and setup instructions
+
+stages:
+  - validate
+
+validate-branch-name:
+  stage: validate
+  image: curlimages/curl:latest
+  script:
+    - |
+      # Determine the branch name to check
+      if [[ "$CI_PIPELINE_SOURCE" == "merge_request_event" ]]; then
+        BRANCH_NAME="$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME"
+      else
+        BRANCH_NAME="$CI_COMMIT_BRANCH"
+      fi
+      
+      # Skip for protected branches
+      if [[ "$BRANCH_NAME" == "stg" || "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+        echo "Protected branch detected, skipping Jira validation"
+        exit 0
+      fi
+      
+      # Check if branch name contains a Jira ticket pattern
+      if ! [[ "$BRANCH_NAME" =~ [A-Z]+-[0-9]+ ]]; then
+        echo "❌ Branch name does not contain a valid Jira ticket ID (e.g., PROJECT-123)"
+        exit 1
+      fi
+      
+      # Extract the Jira ticket ID
+      JIRA_TICKET=$(echo "$BRANCH_NAME" | grep -oE '[A-Z]+-[0-9]+')
+      echo "Found Jira ticket ID: $JIRA_TICKET"
+      
+      # Check if Jira API variables are set
+      if [ -z "$JIRA_URL" ] || [ -z "$JIRA_API_TOKEN" ] || [ -z "$JIRA_USER_EMAIL" ]; then
+        echo "✅ Ticket $JIRA_TICKET matches the required format"
+        echo "⚠️ API validation skipped: One or more required Jira API variables not set"
+        exit 0
+      fi
+      
+      # Construct API URL using recommended format
+      JIRA_ENDPOINT="${JIRA_URL}/rest/api/latest/issue/${JIRA_TICKET}"
+      
+      # Verify ticket exists in Jira
+      RESPONSE_FILE=$(mktemp)
+      HTTP_CODE=$(curl -s -o "$RESPONSE_FILE" -w "%{http_code}" \
+        --connect-timeout 10 --max-time 15 \
+        -u "${JIRA_USER_EMAIL}:${JIRA_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        "$JIRA_ENDPOINT")
+      
+      CURL_EXIT_CODE=$?
+      
+      # Handle connection failures
+      if [ $CURL_EXIT_CODE -ne 0 ]; then
+        echo "⚠️ Jira API connection failed. Allowing pipeline to continue."
+        rm -f "$RESPONSE_FILE"
+        exit 0
+      fi
+      
+      # Process the response code
+      case "$HTTP_CODE" in
+        200)
+          echo "✅ Ticket $JIRA_TICKET exists in Jira"
+          ;;
+        404)
+          echo "❌ Ticket $JIRA_TICKET does not exist in Jira"
+          echo "Make sure the ticket exists in Jira: $JIRA_URL/browse/$JIRA_TICKET"
+          rm -f "$RESPONSE_FILE"
+          exit 1
+          ;;
+        401|403)
+          echo "⚠️ Authentication failed. Check credentials. Continuing with format validation only."
+          ;;
+        5*)
+          echo "⚠️ Jira server error (HTTP $HTTP_CODE). Continuing with format validation only."
+          ;;
+        *)
+          echo "⚠️ Jira validation failed (HTTP $HTTP_CODE). Continuing with format validation only."
+          ;;
+      esac
+      
+      # Clean up
+      rm -f "$RESPONSE_FILE"
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: always
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH != "stg"'
+      when: always
+    - when: never
