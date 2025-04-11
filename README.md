@@ -58,7 +58,7 @@ To create a Jira API token:
 
 1. Log in to your Atlassian account
 2. Go to Account Settings → Security → Create and manage API tokens
-3. Click "Create API token"
+3. Click "Create Classic API token"
 4. Give it a name (e.g., "GitLab CI")
 5. Copy the token and save it in GitLab CI/CD variables
 
